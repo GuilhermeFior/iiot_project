@@ -1,0 +1,46 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python environments and generated files
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# IDE and operating system files
+.idea/
+.vscode/
+*.code-workspace
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local service data and runtime artifacts
+mongo-data/
+mongodb-data/
+data/mongodb/
+data/generated/
+data/processed/
+logs/
+results/
+artifacts/
+mosquitto/data/
+mosquitto/log/
+
+# Temporary Office files
+~$*.docx
+~$*.xlsx
+~$*.pptx
