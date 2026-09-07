@@ -83,6 +83,16 @@ O lote contém 300 medições normais, 120 medições de perturbação de proces
 de persistência. Para reduzir a taxa de envio, informe `--interval`, por
 exemplo `--interval 0.01`.
 
+Para gerar uma base com todos os tipos de anomalia previstos no contrato, use:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.publisher.generate_dataset --count 1000 --normal-before 300 --disturbance-duration 120 --anomaly-profile all_types
+```
+
+O perfil `all_types` acrescenta janelas de ruído, sensor travado, leitura fora
+da faixa operacional e atraso de comunicação. Os comportamentos e limitações
+estão detalhados em [docs/anomaly_simulation.md](docs/anomaly_simulation.md).
+
 ## Análise comparativa das coleções
 
 Com a base já ingerida, execute consultas equivalentes e registre as latências

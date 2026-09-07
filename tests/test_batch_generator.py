@@ -3,7 +3,11 @@
 from datetime import datetime, timezone
 import unittest
 
-from src.publisher.generate_dataset import BatchScenario, generate_batch_payloads
+from src.publisher.generate_dataset import (
+    BatchScenario,
+    anomaly_windows,
+    generate_batch_payloads,
+)
 
 
 class BatchGeneratorTests(unittest.TestCase):
@@ -39,3 +43,29 @@ class BatchGeneratorTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             list(generate_batch_payloads(scenario))
+
+    def test_all_types_profile_generates_each_contract_anomaly(self) -> None:
+        scenario = BatchScenario(
+            count=30,
+            normal_before_messages=2,
+            disturbance_duration_messages=2,
+            simulation_step_s=1.0,
+            anomaly_profile="all_types",
+            sensor_anomaly_duration_messages=2,
+            normal_between_anomalies_messages=1,
+        )
+
+        payloads = list(generate_batch_payloads(scenario))
+        anomaly_types = {payload["anomaly"]["type"] for payload in payloads}
+
+        self.assertEqual(
+            anomaly_types - {None},
+            {
+                "process_disturbance",
+                "sensor_noise",
+                "sensor_stuck",
+                "sensor_out_of_range",
+                "communication_delay",
+            },
+        )
+        self.assertEqual(len(anomaly_windows(scenario)), 5)

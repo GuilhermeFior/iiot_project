@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import time
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from threading import Event
@@ -15,6 +16,7 @@ import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
 
 from src.publisher.telemetry import build_telemetry_payload
+from src.simulator.anomalies import AnomalyWindow, TelemetryFaultInjector
 from src.simulator.neutralization import NeutralizationConfig, NeutralizationSimulator
 
 
@@ -26,6 +28,10 @@ class BatchScenario:
     normal_before_messages: int
     disturbance_duration_messages: int
     simulation_step_s: float
+    anomaly_profile: str = "process_only"
+    sensor_anomaly_duration_messages: int = 60
+    normal_between_anomalies_messages: int = 40
+    communication_delay_s: float = 30.0
 
     def validate(self) -> None:
         if self.count <= 0:
@@ -36,14 +42,51 @@ class BatchScenario:
             raise ValueError("disturbance_duration_messages deve ser maior que zero")
         if self.simulation_step_s <= 0:
             raise ValueError("simulation_step_s deve ser maior que zero")
-        disturbance_end = (
-            self.normal_before_messages + self.disturbance_duration_messages
-        )
-        if disturbance_end >= self.count:
+        if self.anomaly_profile not in {"process_only", "all_types"}:
+            raise ValueError("anomaly_profile deve ser process_only ou all_types")
+        if self.sensor_anomaly_duration_messages <= 0:
+            raise ValueError("sensor_anomaly_duration_messages deve ser maior que zero")
+        if self.normal_between_anomalies_messages < 0:
+            raise ValueError("normal_between_anomalies_messages não pode ser negativo")
+        if self.communication_delay_s <= 0:
+            raise ValueError("communication_delay_s deve ser maior que zero")
+        if anomaly_windows(self)[-1].end_sequence >= self.count:
             raise ValueError(
                 "count deve incluir ao menos uma mensagem de recuperação após a "
                 "perturbação"
             )
+
+
+def anomaly_windows(scenario: BatchScenario) -> list[AnomalyWindow]:
+    """Define períodos não sobrepostos de anomalias para um perfil de lote."""
+    windows = [
+        AnomalyWindow(
+            anomaly_type="process_disturbance",
+            start_sequence=scenario.normal_before_messages,
+            duration_messages=scenario.disturbance_duration_messages,
+        )
+    ]
+    if scenario.anomaly_profile == "process_only":
+        return windows
+
+    next_start = (
+        windows[-1].end_sequence + scenario.normal_between_anomalies_messages
+    )
+    for anomaly_type in (
+        "sensor_noise",
+        "sensor_stuck",
+        "sensor_out_of_range",
+        "communication_delay",
+    ):
+        windows.append(
+            AnomalyWindow(
+                anomaly_type=anomaly_type,
+                start_sequence=next_start,
+                duration_messages=scenario.sensor_anomaly_duration_messages,
+            )
+        )
+        next_start = windows[-1].end_sequence + scenario.normal_between_anomalies_messages
+    return windows
 
 
 def format_rfc3339(timestamp: datetime) -> str:
@@ -71,17 +114,22 @@ def generate_batch_payloads(
             ),
         )
     )
+    fault_injector = TelemetryFaultInjector(
+        [window for window in anomaly_windows(scenario) if window.anomaly_type != "process_disturbance"],
+        communication_delay_s=scenario.communication_delay_s,
+    )
 
     for sequence in range(scenario.count):
         snapshot = simulator.step(scenario.simulation_step_s)
         simulated_timestamp = first_timestamp + timedelta(
             seconds=(sequence + 1) * scenario.simulation_step_s
         )
-        yield build_telemetry_payload(
+        payload = build_telemetry_payload(
             sequence=sequence,
             snapshot=snapshot,
             timestamp=format_rfc3339(simulated_timestamp),
         )
+        yield fault_injector.apply(payload, sequence)
 
 
 def positive_int(value: str) -> int:
@@ -123,6 +171,30 @@ def parse_arguments() -> argparse.Namespace:
         help="Número de medições rotuladas como perturbação de processo.",
     )
     parser.add_argument(
+        "--anomaly-profile",
+        choices=("process_only", "all_types"),
+        default="process_only",
+        help="Processa somente perturbação física ou todos os tipos do contrato.",
+    )
+    parser.add_argument(
+        "--sensor-anomaly-duration",
+        type=positive_int,
+        default=60,
+        help="Duração de cada anomalia de sensor ou comunicação.",
+    )
+    parser.add_argument(
+        "--normal-between-anomalies",
+        type=non_negative_int,
+        default=40,
+        help="Medições normais entre períodos de anomalia no perfil all_types.",
+    )
+    parser.add_argument(
+        "--communication-delay",
+        type=float,
+        default=30.0,
+        help="Atraso artificial, em segundos, aplicado ao timestamp da mensagem.",
+    )
+    parser.add_argument(
         "--simulation-step",
         type=float,
         default=1.0,
@@ -153,6 +225,10 @@ def main() -> None:
         normal_before_messages=arguments.normal_before,
         disturbance_duration_messages=arguments.disturbance_duration,
         simulation_step_s=arguments.simulation_step,
+        anomaly_profile=arguments.anomaly_profile,
+        sensor_anomaly_duration_messages=arguments.sensor_anomaly_duration,
+        normal_between_anomalies_messages=arguments.normal_between_anomalies,
+        communication_delay_s=arguments.communication_delay,
     )
     scenario.validate()
 
@@ -187,7 +263,7 @@ def main() -> None:
     client.loop_start()
 
     published = 0
-    anomaly_messages = 0
+    anomaly_counts: Counter[str] = Counter()
     try:
         if not connected.wait(timeout=5):
             raise TimeoutError("O broker MQTT não confirmou a conexão em 5 segundos")
@@ -201,11 +277,13 @@ def main() -> None:
                 )
 
             published += 1
-            anomaly_messages += int(payload["anomaly"]["label"])
+            anomaly_type = payload["anomaly"]["type"]
+            if anomaly_type:
+                anomaly_counts[anomaly_type] += 1
             if published % arguments.progress_every == 0 or published == scenario.count:
                 print(
                     f"Publicado {published}/{scenario.count} mensagens "
-                    f"(anomalias={anomaly_messages})"
+                    f"(anomalias={sum(anomaly_counts.values())})"
                 )
             if published < scenario.count and arguments.interval:
                 time.sleep(arguments.interval)
@@ -213,10 +291,11 @@ def main() -> None:
         client.loop_stop()
         client.disconnect()
 
-    print(
-        f"Lote concluído: {published} mensagens em {topic}; "
-        f"{anomaly_messages} rotuladas como process_disturbance."
-    )
+    anomaly_summary = ", ".join(
+        f"{anomaly_type}={count}"
+        for anomaly_type, count in sorted(anomaly_counts.items())
+    ) or "nenhuma anomalia"
+    print(f"Lote concluído: {published} mensagens em {topic}; {anomaly_summary}.")
 
 
 if __name__ == "__main__":
