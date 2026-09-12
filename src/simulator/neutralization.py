@@ -31,6 +31,9 @@ class NeutralizationConfig:
     disturbance_start_s: float | None = None
     disturbance_duration_s: float = 20.0
     disturbance_flow_increment_l_s: float = 1.5
+    excitation_start_s: float | None = None
+    excitation_duration_s: float = 20.0
+    excitation_base_increment_mol_l: float = 0.006
 
 
 @dataclass(frozen=True)
@@ -80,6 +83,13 @@ class NeutralizationSimulator:
             and start <= self._time_s < start + self.config.disturbance_duration_s
         )
 
+    def _excitation_is_active(self) -> bool:
+        start = self.config.excitation_start_s
+        return (
+            start is not None
+            and start <= self._time_s < start + self.config.excitation_duration_s
+        )
+
     def step(self, time_step_s: float = 1.0) -> ProcessSnapshot:
         """Avança a planta em ``time_step_s`` segundos e retorna sua telemetria."""
         if time_step_s <= 0:
@@ -100,13 +110,17 @@ class NeutralizationSimulator:
         )
 
         disturbance_active = self._disturbance_is_active()
+        excitation_active = self._excitation_is_active()
         effluent_flow_l_s = self.config.nominal_effluent_flow_l_s
         if disturbance_active:
             effluent_flow_l_s += self.config.disturbance_flow_increment_l_s
+        base_equivalent_mol_l = self.config.base_equivalent_mol_l
+        if excitation_active:
+            base_equivalent_mol_l += self.config.excitation_base_increment_mol_l
 
         # Balanço de equivalentes em um tanque perfeitamente misturado.
         net_input_mol_s = (
-            effluent_flow_l_s * self.config.base_equivalent_mol_l
+            effluent_flow_l_s * base_equivalent_mol_l
             - self._acid_flow_l_s * self.config.acid_equivalent_mol_l
         )
         outlet_equivalent_mol_s = (

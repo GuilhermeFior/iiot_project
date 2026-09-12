@@ -1,4 +1,5 @@
 import unittest
+from uuid import uuid4
 
 from pydantic import ValidationError
 
@@ -30,6 +31,19 @@ class TelemetryMessageValidationTests(unittest.TestCase):
 
         with self.assertRaises(ValidationError):
             TelemetryMessage.model_validate(payload)
+
+    def test_experiment_run_id_is_converted_for_mongodb(self) -> None:
+        run_id = uuid4()
+        payload = build_telemetry_payload(
+            sequence=5,
+            snapshot=NeutralizationSimulator().step(),
+            experiment_run_id=run_id,
+            experiment_profile="stuck_observable",
+        )
+
+        document = TelemetryMessage.model_validate(payload).to_mongo_document()
+
+        self.assertEqual(document["experiment"]["run_id"], str(run_id))
 
     def test_ph_outside_physical_range_is_rejected(self) -> None:
         payload = build_telemetry_payload(

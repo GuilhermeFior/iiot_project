@@ -60,6 +60,15 @@ class Anomaly(BaseModel):
         return self
 
 
+class Experiment(BaseModel):
+    """Identifica um lote reprodutível sem alterar os metadados da fonte."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: UUID
+    profile: str = Field(min_length=1)
+
+
 class TelemetryMessage(BaseModel):
     """Mensagem de telemetria na versão inicial do contrato MQTT."""
 
@@ -73,10 +82,13 @@ class TelemetryMessage(BaseModel):
     measurements: Measurements
     controller: ControllerState
     anomaly: Anomaly
+    experiment: Experiment | None = None
 
     def to_mongo_document(self, received_at: datetime | None = None) -> dict:
         """Converte a mensagem para tipos BSON compatíveis com o MongoDB."""
         document = self.model_dump(mode="python")
         document["message_id"] = str(self.message_id)
+        if document["experiment"] is not None:
+            document["experiment"]["run_id"] = str(document["experiment"]["run_id"])
         document["received_at"] = received_at or datetime.now(timezone.utc)
         return document

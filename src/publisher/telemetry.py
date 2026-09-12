@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from src.simulator.neutralization import ProcessSnapshot
 
@@ -23,13 +23,21 @@ def utc_timestamp() -> str:
 
 
 def build_telemetry_payload(
-    sequence: int, snapshot: ProcessSnapshot, timestamp: str | None = None
+    sequence: int,
+    snapshot: ProcessSnapshot,
+    timestamp: str | None = None,
+    experiment_run_id: UUID | str | None = None,
+    experiment_profile: str | None = None,
 ) -> dict[str, Any]:
     """Converte um estado do simulador em mensagem do contrato MQTT."""
     if sequence < 0:
         raise ValueError("sequence deve ser um inteiro não negativo")
+    if (experiment_run_id is None) != (experiment_profile is None):
+        raise ValueError(
+            "experiment_run_id e experiment_profile devem ser informados juntos"
+        )
 
-    return {
+    payload = {
         "schema_version": SCHEMA_VERSION,
         "message_id": str(uuid4()),
         "sequence": sequence,
@@ -57,3 +65,9 @@ def build_telemetry_payload(
             "type": snapshot.anomaly_type,
         },
     }
+    if experiment_run_id is not None:
+        payload["experiment"] = {
+            "run_id": str(experiment_run_id),
+            "profile": experiment_profile,
+        }
+    return payload

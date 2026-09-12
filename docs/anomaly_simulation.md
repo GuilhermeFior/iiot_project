@@ -3,7 +3,11 @@
 O gerador de lote possui dois perfis. O padrão `process_only` preserva a série
 anterior: uma perturbação física aumenta a vazão afluente e mobiliza o
 controlador Fuzzy-PI. O perfil `all_types` gera, além desse evento, janelas não
-sobrepostas para todos os tipos definidos no contrato.
+sobrepostas para todos os tipos definidos no contrato. O perfil
+`stuck_observable` usa as mesmas janelas, mas acrescenta uma variação temporária
+na concentração básica de entrada durante o sensor travado. Essa concentração
+não é telemetria observada; assim, o pH real se altera enquanto a leitura fica
+congelada.
 
 | Tipo | Camada afetada | Comportamento simulado |
 |---|---|---|
@@ -16,6 +20,8 @@ sobrepostas para todos os tipos definidos no contrato.
 As falhas de sensor e de comunicação não alteram o estado interno do tanque ou
 a ação do controlador; elas representam exclusivamente o que chega à camada de
 ingestão. Isso permite diferenciar anomalia de processo de anomalia de medição.
+No perfil `stuck_observable`, a exceção é uma excitação de processo não medida,
+introduzida apenas para tornar a falha de leitura congelada identificável.
 
 ## Execução
 
@@ -30,3 +36,8 @@ perturbação de processo, quatro janelas de 60 mensagens para os demais tipos,
 O consumidor MQTT deve estar em execução antes da publicação. Nesse exemplo, o
 perfil insere 360 mensagens rotuladas: 120 de perturbação de processo e 60 de
 cada um dos quatro tipos restantes.
+
+Para criar uma execução isolada de validação do sensor travado, use
+`--anomaly-profile stuck_observable`. Todo lote novo recebe automaticamente um
+`experiment.run_id`, exibido ao fim da execução. Esse valor pode ser reutilizado
+com `--run-id` ou usado para filtrar a análise.

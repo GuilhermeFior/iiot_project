@@ -2,7 +2,11 @@
 
 import unittest
 
-from src.analysis.report_artifacts import polyline_points, scale_values
+from src.analysis.report_artifacts import (
+    multi_detection_markdown,
+    polyline_points,
+    scale_values,
+)
 
 
 class ReportArtifactTests(unittest.TestCase):
@@ -16,3 +20,28 @@ class ReportArtifactTests(unittest.TestCase):
         points = polyline_points([1.0, 2.0, 3.0], 0.0, 100.0, 0.0, 100.0)
 
         self.assertEqual(len(points.split()), 3)
+
+    def test_multi_detection_markdown_includes_all_metrics(self) -> None:
+        content = multi_detection_markdown(
+            {
+                "run_id": "run-test",
+                "collection": "telemetry_timeseries",
+                "observations": 10,
+                "detectors": {
+                    "sensor_stuck": {
+                        "metrics": {
+                            "true_positive": 6,
+                            "false_positive": 1,
+                            "false_negative": 2,
+                            "precision": 0.8571,
+                            "recall": 0.75,
+                            "f1_score": 0.8,
+                        }
+                    }
+                },
+            }
+        )
+
+        self.assertIn("run-test", content)
+        self.assertIn("sensor_stuck", content)
+        self.assertIn("0.8000", content)

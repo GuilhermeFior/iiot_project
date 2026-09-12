@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from threading import Event
 from typing import Iterator
+from uuid import UUID, uuid4
 
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
@@ -42,8 +43,14 @@ class BatchScenario:
             raise ValueError("disturbance_duration_messages deve ser maior que zero")
         if self.simulation_step_s <= 0:
             raise ValueError("simulation_step_s deve ser maior que zero")
-        if self.anomaly_profile not in {"process_only", "all_types"}:
-            raise ValueError("anomaly_profile deve ser process_only ou all_types")
+        if self.anomaly_profile not in {
+            "process_only",
+            "all_types",
+            "stuck_observable",
+        }:
+            raise ValueError(
+                "anomaly_profile deve ser process_only, all_types ou stuck_observable"
+            )
         if self.sensor_anomaly_duration_messages <= 0:
             raise ValueError("sensor_anomaly_duration_messages deve ser maior que zero")
         if self.normal_between_anomalies_messages < 0:
@@ -97,13 +104,27 @@ def format_rfc3339(timestamp: datetime) -> str:
 
 
 def generate_batch_payloads(
-    scenario: BatchScenario, start_timestamp: datetime | None = None
+    scenario: BatchScenario,
+    start_timestamp: datetime | None = None,
+    run_id: UUID | None = None,
 ) -> Iterator[dict]:
     """Produz payloads ordenados com timestamps correspondentes ao tempo simulado."""
     scenario.validate()
     first_timestamp = (start_timestamp or datetime.now(timezone.utc)).astimezone(
         timezone.utc
     )
+    experiment_run_id = run_id or uuid4()
+    windows = anomaly_windows(scenario)
+    stuck_window = next(
+        (window for window in windows if window.anomaly_type == "sensor_stuck"), None
+    )
+    excitation_start_s = None
+    excitation_duration_s = 20.0
+    if scenario.anomaly_profile == "stuck_observable" and stuck_window:
+        excitation_start_s = stuck_window.start_sequence * scenario.simulation_step_s
+        excitation_duration_s = (
+            stuck_window.duration_messages * scenario.simulation_step_s
+        )
     simulator = NeutralizationSimulator(
         NeutralizationConfig(
             disturbance_start_s=(
@@ -112,10 +133,12 @@ def generate_batch_payloads(
             disturbance_duration_s=(
                 scenario.disturbance_duration_messages * scenario.simulation_step_s
             ),
+            excitation_start_s=excitation_start_s,
+            excitation_duration_s=excitation_duration_s,
         )
     )
     fault_injector = TelemetryFaultInjector(
-        [window for window in anomaly_windows(scenario) if window.anomaly_type != "process_disturbance"],
+        [window for window in windows if window.anomaly_type != "process_disturbance"],
         communication_delay_s=scenario.communication_delay_s,
     )
 
@@ -128,6 +151,8 @@ def generate_batch_payloads(
             sequence=sequence,
             snapshot=snapshot,
             timestamp=format_rfc3339(simulated_timestamp),
+            experiment_run_id=experiment_run_id,
+            experiment_profile=scenario.anomaly_profile,
         )
         yield fault_injector.apply(payload, sequence)
 
@@ -172,9 +197,9 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "--anomaly-profile",
-        choices=("process_only", "all_types"),
+        choices=("process_only", "all_types", "stuck_observable"),
         default="process_only",
-        help="Processa somente perturbação física ou todos os tipos do contrato.",
+        help="Seleciona o perfil de anomalias e, opcionalmente, sensor travado observável.",
     )
     parser.add_argument(
         "--sensor-anomaly-duration",
@@ -212,6 +237,11 @@ def parse_arguments() -> argparse.Namespace:
         default=100,
         help="Frequência, em mensagens, da saída de progresso.",
     )
+    parser.add_argument(
+        "--run-id",
+        type=UUID,
+        help="UUID opcional para reproduzir e filtrar um lote experimental.",
+    )
     return parser.parse_args()
 
 
@@ -231,6 +261,7 @@ def main() -> None:
         communication_delay_s=arguments.communication_delay,
     )
     scenario.validate()
+    run_id = arguments.run_id or uuid4()
 
     load_dotenv()
     host = os.getenv("MQTT_HOST", "localhost")
@@ -268,7 +299,7 @@ def main() -> None:
         if not connected.wait(timeout=5):
             raise TimeoutError("O broker MQTT não confirmou a conexão em 5 segundos")
 
-        for payload in generate_batch_payloads(scenario):
+        for payload in generate_batch_payloads(scenario, run_id=run_id):
             result = client.publish(topic, json.dumps(payload), qos=0)
             result.wait_for_publish()
             if result.rc != mqtt.MQTT_ERR_SUCCESS:
@@ -295,7 +326,10 @@ def main() -> None:
         f"{anomaly_type}={count}"
         for anomaly_type, count in sorted(anomaly_counts.items())
     ) or "nenhuma anomalia"
-    print(f"Lote concluído: {published} mensagens em {topic}; {anomaly_summary}.")
+    print(
+        f"Lote concluído: {published} mensagens em {topic}; {anomaly_summary}; "
+        f"run_id={run_id}."
+    )
 
 
 if __name__ == "__main__":

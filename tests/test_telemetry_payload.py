@@ -1,5 +1,5 @@
 import unittest
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from src.publisher.telemetry import build_telemetry_payload
 from src.simulator.neutralization import NeutralizationSimulator
@@ -27,3 +27,15 @@ class TelemetryPayloadTests(unittest.TestCase):
             build_telemetry_payload(
                 sequence=-1, snapshot=NeutralizationSimulator().step()
             )
+
+    def test_experiment_metadata_is_added_as_a_batch_identifier(self) -> None:
+        run_id = uuid4()
+        payload = build_telemetry_payload(
+            sequence=0,
+            snapshot=NeutralizationSimulator().step(),
+            experiment_run_id=run_id,
+            experiment_profile="stuck_observable",
+        )
+
+        self.assertEqual(payload["experiment"]["run_id"], str(run_id))
+        self.assertEqual(payload["experiment"]["profile"], "stuck_observable")

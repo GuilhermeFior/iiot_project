@@ -45,6 +45,10 @@ Cada publicação deve ser um objeto JSON UTF-8 com a estrutura abaixo.
   "anomaly": {
     "label": false,
     "type": null
+  },
+  "experiment": {
+    "run_id": "db6654dd-34fb-4b1c-a76e-38e9c3da7c8a",
+    "profile": "stuck_observable"
   }
 }
 ```
@@ -56,6 +60,7 @@ Cada publicação deve ser um objeto JSON UTF-8 com a estrutura abaixo.
 - `sequence` é um inteiro crescente por execução do simulador e permite identificar perdas ou reordenação de mensagens.
 - `timestamp` representa o instante de geração da medição em UTC, no formato RFC 3339 com o sufixo `Z`.
 - O serviço de ingestão acrescentará um `received_at` em UTC para registrar o instante de recebimento, sem substituir o `timestamp` original.
+- `experiment` é opcional para manter compatibilidade com telemetrias anteriores. Quando presente, `run_id` identifica uma execução do gerador e `profile` identifica o cenário simulado. Esses campos não integram `source` e, portanto, não alteram o `metaField` da coleção Time Series.
 - O campo `source` será usado como base do `metaField` da coleção MongoDB Time Series; por isso, seus valores devem mudar raramente.
 - Os campos de `measurements` são métricas variáveis e devem ser numéricos, exceto o estado lógico do atuador, quando incluído em versões futuras.
 - `anomaly.label` indica se a observação faz parte de uma anomalia simulada. Quando for `true`, `anomaly.type` deve conter um dos valores definidos a seguir.

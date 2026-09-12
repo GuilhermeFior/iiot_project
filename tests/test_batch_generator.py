@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 import unittest
+from uuid import uuid4
 
 from src.publisher.generate_dataset import (
     BatchScenario,
@@ -69,3 +70,39 @@ class BatchGeneratorTests(unittest.TestCase):
             },
         )
         self.assertEqual(len(anomaly_windows(scenario)), 5)
+
+    def test_stuck_observable_profile_creates_process_change_under_stuck_reading(self) -> None:
+        scenario = BatchScenario(
+            count=50,
+            normal_before_messages=2,
+            disturbance_duration_messages=2,
+            simulation_step_s=1.0,
+            anomaly_profile="stuck_observable",
+            sensor_anomaly_duration_messages=6,
+            normal_between_anomalies_messages=1,
+        )
+        run_id = uuid4()
+
+        payloads = list(generate_batch_payloads(scenario, run_id=run_id))
+        stuck_payloads = [
+            payload
+            for payload in payloads
+            if payload["anomaly"]["type"] == "sensor_stuck"
+        ]
+
+        self.assertTrue(
+            any(
+                abs(
+                    payload["measurements"]["ph"]
+                    - (
+                        payload["controller"]["setpoint_ph"]
+                        + payload["controller"]["error_ph"]
+                    )
+                )
+                > 0.01
+                for payload in stuck_payloads
+            )
+        )
+        self.assertTrue(
+            all(payload["experiment"]["run_id"] == str(run_id) for payload in payloads)
+        )

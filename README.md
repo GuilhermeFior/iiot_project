@@ -93,19 +93,27 @@ O perfil `all_types` acrescenta janelas de ruído, sensor travado, leitura fora
 da faixa operacional e atraso de comunicação. Os comportamentos e limitações
 estão detalhados em [docs/anomaly_simulation.md](docs/anomaly_simulation.md).
 
+Use `--anomaly-profile stuck_observable` para uma execução de validação do
+sensor travado. O gerador informa um `run_id` ao terminar; esse UUID permite
+filtrar a avaliação sem misturar lotes distintos.
+
 ## Análise comparativa das coleções
 
 Com a base já ingerida, execute consultas equivalentes e registre as latências
 em um arquivo local:
 
 ```powershell
-.\.venv\Scripts\python.exe -m src.analysis.benchmark_queries --iterations 20 --warmup 5 --series-limit 250
+.\.venv\Scripts\python.exe -m src.analysis.benchmark_queries --iterations 10 --warmup 2 --series-limit 250 --window-hours 1,6,24
 ```
 
-O script mede recuperação de telemetria recente, filtro de perturbações e resumo
-agregado para as coleções documental e Time Series. Os resultados ficam em
+O script mede recuperação de telemetria recente, janelas de 1 h, 6 h e 24 h,
+filtro de perturbações, resumo agregado e estatísticas de armazenamento para as
+coleções documental e Time Series. Os resultados ficam em
 `artifacts/analysis/benchmark_results.json`; o protocolo está documentado em
 [docs/analysis_protocol.md](docs/analysis_protocol.md).
+
+Para repetir o benchmark somente sobre a base original, sem lotes de validação
+identificados, acrescente `--without-experiment` ao comando.
 
 ## Detector inicial e artefatos para o relatório
 
@@ -121,6 +129,36 @@ Os comandos produzem, em `artifacts/analysis/`, a matriz de confusão e métrica
 do detector, uma tabela Markdown com os resultados de benchmark e o gráfico SVG
 `telemetry_overview.svg`. Consulte [docs/anomaly_detection.md](docs/anomaly_detection.md)
 para as hipóteses e limitações do método.
+
+Para avaliar todos os tipos de anomalia separadamente, execute:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.analysis.multi_anomaly_detection --collection timeseries
+```
+
+O método e os critérios iniciais estão em
+[docs/multi_anomaly_detection.md](docs/multi_anomaly_detection.md).
+
+A síntese final do experimento, incluindo a comparação Documental × Time Series,
+o armazenamento e as métricas dos detectores, está em
+[docs/technical_analysis_conclusion.md](docs/technical_analysis_conclusion.md).
+O roteiro de aceite e execução da entrega está em
+[docs/software_delivery.md](docs/software_delivery.md).
+
+## Painel local do experimento
+
+Para inspecionar visualmente um lote identificado, exporte um painel HTML
+autocontido. Ele apresenta pH medido e estimado, vazões, faixas de anomalia e
+as métricas calculadas para a mesma execução:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.analysis.dashboard `
+  --run-id SEU-UUID `
+  --detection-input artifacts/analysis/multi_anomaly_detection_results.json
+```
+
+O arquivo é salvo em `artifacts/dashboard/iiot_experiment_dashboard.html` e
+pode ser aberto diretamente em qualquer navegador moderno.
 
 ## Serviço de ingestão
 

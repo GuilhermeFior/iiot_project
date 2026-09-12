@@ -1,8 +1,15 @@
 """Testes de utilitários puros do benchmark de consultas."""
 
+from datetime import datetime, timezone
 import unittest
 
-from src.analysis.benchmark_queries import latency_summary, summarize_plan
+from src.analysis.benchmark_queries import (
+    dataset_filter,
+    latency_summary,
+    parse_window_hours,
+    summarize_plan,
+    time_window_query,
+)
 
 
 class BenchmarkUtilityTests(unittest.TestCase):
@@ -27,3 +34,20 @@ class BenchmarkUtilityTests(unittest.TestCase):
         }
 
         self.assertEqual(summarize_plan(plan), ["FETCH", "IXSCAN"])
+
+    def test_parse_window_hours_accepts_distinct_positive_csv_values(self) -> None:
+        self.assertEqual(parse_window_hours("1, 6,24"), [1, 6, 24])
+
+    def test_time_window_query_includes_source_and_bounds(self) -> None:
+        start = datetime(2026, 9, 7, 12, tzinfo=timezone.utc)
+        end = datetime(2026, 9, 7, 13, tzinfo=timezone.utc)
+
+        query = time_window_query(start, end)
+
+        self.assertEqual(query["timestamp"], {"$gte": start, "$lte": end})
+        self.assertEqual(query["source.plant_id"], "simulated-plant-01")
+
+    def test_dataset_filter_can_select_only_legacy_records(self) -> None:
+        query = dataset_filter(run_id=None, without_experiment=True)
+
+        self.assertEqual(query["experiment"], {"$exists": False})
